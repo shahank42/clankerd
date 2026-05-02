@@ -1,12 +1,13 @@
 import { Effect, Ref, Schedule } from "effect"
-import { AgentService } from "./agent.js"
-import { AppConfig } from "./config.js"
-import { TelegramBot } from "./telegram.js"
+import { AgentService } from "./agent/service.js"
+import { AppConfig } from "./config/service.js"
+import { TelegramBot } from "./telegram/service.js"
 
 export const program = Effect.gen(function* () {
   const bot = yield* TelegramBot
   const agent = yield* AgentService
   const config = yield* AppConfig
+
   const offsetRef = yield* Ref.make(0)
 
   yield* Effect.repeat(
@@ -27,7 +28,7 @@ export const program = Effect.gen(function* () {
             yield* Effect.log(`Received: ${text}`)
             const reply = yield* agent.run(text)
             yield* bot.sendMessage(message.chat.id, reply)
-          }).pipe(Effect.tapError(error => Effect.logError(`Failed to process update: ${error}`))),
+          }).pipe(Effect.catch(error => Effect.logError(`Failed to process update: ${error}`))),
         { discard: true }
       )
 
@@ -35,7 +36,7 @@ export const program = Effect.gen(function* () {
       if (lastUpdate) {
         yield* Ref.set(offsetRef, lastUpdate.update_id + 1)
       }
-    }).pipe(Effect.tapError(error => Effect.logError(`Poll failed: ${error}`))),
+    }).pipe(Effect.catch(error => Effect.logError(`Poll failed: ${error}`))),
     Schedule.spaced("1 second")
   )
 })

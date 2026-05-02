@@ -2,15 +2,8 @@ import { Effect } from "effect"
 import * as clack from "@clack/prompts"
 import { getProviders, getModels, getEnvApiKey } from "@mariozechner/pi-ai"
 import type { KnownProvider } from "@mariozechner/pi-ai"
+import { ConfigFile } from "./domain.js"
 import { SetupError } from "./errors.js"
-
-export interface SetupConfig {
-  readonly llmProvider: string
-  readonly llmModel: string
-  readonly apiKey: string
-  readonly telegramToken: string
-  readonly allowedUsername: string
-}
 
 const isCancel = (value: unknown): value is symbol =>
   typeof value === "symbol" && value.toString() === "Symbol(clack.cancel)"
@@ -24,12 +17,14 @@ export const runInteractiveSetup = Effect.fn("runInteractiveSetup")(function* ()
   const providerValue = yield* Effect.promise(() =>
     clack.select({
       message: "Select LLM provider:",
-      options: providerOptions,
+      options: providerOptions
     })
   )
+
   if (isCancel(providerValue)) {
     return yield* new SetupError({ message: "Setup cancelled by user" })
   }
+
   const provider = providerValue
 
   const models = getModels(provider as KnownProvider)
@@ -38,12 +33,14 @@ export const runInteractiveSetup = Effect.fn("runInteractiveSetup")(function* ()
   const modelValue = yield* Effect.promise(() =>
     clack.select({
       message: "Select model:",
-      options: modelOptions,
+      options: modelOptions
     })
   )
+
   if (isCancel(modelValue)) {
     return yield* new SetupError({ message: "Setup cancelled by user" })
   }
+
   const model = modelValue
 
   const envKey = getEnvApiKey(provider as KnownProvider)
@@ -54,12 +51,14 @@ export const runInteractiveSetup = Effect.fn("runInteractiveSetup")(function* ()
       message: `Enter API key for ${provider}${apiKeyHint}:`,
       validate: value => {
         if (!value || value.length === 0) return "API key is required"
-      },
+      }
     })
   )
+
   if (isCancel(apiKeyValue)) {
     return yield* new SetupError({ message: "Setup cancelled by user" })
   }
+
   const apiKey = apiKeyValue
 
   const telegramTokenValue = yield* Effect.promise(() =>
@@ -67,12 +66,14 @@ export const runInteractiveSetup = Effect.fn("runInteractiveSetup")(function* ()
       message: "Enter Telegram bot token:",
       validate: value => {
         if (!value || value.length === 0) return "Bot token is required"
-      },
+      }
     })
   )
+
   if (isCancel(telegramTokenValue)) {
     return yield* new SetupError({ message: "Setup cancelled by user" })
   }
+
   const telegramToken = telegramTokenValue
 
   const allowedUsernameValue = yield* Effect.promise(() =>
@@ -80,21 +81,23 @@ export const runInteractiveSetup = Effect.fn("runInteractiveSetup")(function* ()
       message: "Enter your Telegram username (without @):",
       validate: value => {
         if (!value || value.length === 0) return "Username is required"
-      },
+      }
     })
   )
+
   if (isCancel(allowedUsernameValue)) {
     return yield* new SetupError({ message: "Setup cancelled by user" })
   }
+
   const allowedUsername = allowedUsernameValue
 
   yield* Effect.log("Setup complete!")
 
-  return {
+  return new ConfigFile({
     llmProvider: provider,
     llmModel: model,
     apiKey,
     telegramToken,
-    allowedUsername,
-  } satisfies SetupConfig
+    allowedUsername
+  })
 })
