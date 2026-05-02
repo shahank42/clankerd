@@ -1,11 +1,13 @@
-import { Effect, Layer, Redacted } from "effect"
+import { Effect, Layer, Redacted, Schema } from "effect"
 import * as Context from "effect/Context"
+import { AppConfig } from "./config.js"
 import { TelegramError } from "./errors.js"
 
 interface TelegramUser {
   id: number
   is_bot: boolean
   first_name: string
+  username?: string
 }
 
 interface TelegramChat {
@@ -31,6 +33,13 @@ interface TelegramResponse<T> {
   description?: string
   error_code?: number
 }
+
+const SendMessageBody = Schema.Struct({
+  chat_id: Schema.Number,
+  text: Schema.String,
+})
+
+const encodeSendMessageBody = Schema.encodeSync(Schema.fromJsonString(SendMessageBody))
 
 export class TelegramBot extends Context.Service<
   TelegramBot,
@@ -69,7 +78,7 @@ export class TelegramBot extends Context.Service<
         (chatId: number, text: string): Effect.Effect<void, TelegramError> =>
           Effect.tryPromise({
             try: async () => {
-              const body = JSON.stringify({ chat_id: chatId, text })
+              const body = encodeSendMessageBody({ chat_id: chatId, text })
               const res = await fetch(`${baseUrl}/sendMessage`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -90,5 +99,4 @@ export class TelegramBot extends Context.Service<
   )
 }
 
-import { AppConfig } from "./config.js"
 export type { TelegramUpdate, TelegramMessage }

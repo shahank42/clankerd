@@ -19,7 +19,7 @@ export const program = Effect.gen(function* () {
         update =>
           Effect.gen(function* () {
             const message = update.message
-            if (!message || message.from?.id !== config.allowedUserId) return
+            if (!message || message.from?.username !== config.allowedUsername) return
 
             const text = message.text
             if (!text) return
@@ -27,7 +27,7 @@ export const program = Effect.gen(function* () {
             yield* Effect.log(`Received: ${text}`)
             const reply = yield* agent.run(text)
             yield* bot.sendMessage(message.chat.id, reply)
-          }).pipe(Effect.catch(error => Effect.logError(`Failed to process update: ${error}`))),
+          }).pipe(Effect.tapError(error => Effect.logError(`Failed to process update: ${error}`))),
         { discard: true }
       )
 
@@ -35,7 +35,7 @@ export const program = Effect.gen(function* () {
       if (lastUpdate) {
         yield* Ref.set(offsetRef, lastUpdate.update_id + 1)
       }
-    }).pipe(Effect.catch(error => Effect.logError(`Poll failed: ${error}`))),
+    }).pipe(Effect.tapError(error => Effect.logError(`Poll failed: ${error}`))),
     Schedule.spaced("1 second")
   )
 })

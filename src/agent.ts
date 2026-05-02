@@ -1,7 +1,7 @@
 import { Agent } from "@mariozechner/pi-agent-core"
 import { getModel } from "@mariozechner/pi-ai"
 import { createBashTool } from "@mariozechner/pi-coding-agent"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Redacted } from "effect"
 import * as Context from "effect/Context"
 import { AgentError } from "./errors.js"
 import { AppConfig } from "./config.js"
@@ -26,8 +26,9 @@ export class AgentService extends Context.Service<
             "You are a helpful assistant that can run shell commands on the user's laptop. " +
             "Use the bash tool to execute commands and answer the user's questions.",
           model,
-          tools: [bashTool]
-        }
+          tools: [bashTool],
+        },
+        getApiKey: (_provider: string) => Redacted.value(config.apiKey),
       })
 
       const run = Effect.fn("AgentService.run")(
