@@ -1,11 +1,12 @@
 import { Agent } from "@mariozechner/pi-agent-core"
 import { getModel, getModels, getProviders } from "@mariozechner/pi-ai"
 import type { KnownProvider } from "@mariozechner/pi-ai"
-import { createBashTool } from "@mariozechner/pi-coding-agent"
 import { Effect, Redacted } from "effect"
 import * as Context from "effect/Context"
 import { AppConfig } from "../config/service.js"
 import { AgentError } from "./errors.js"
+import { buildSystemPrompt } from "./prompt.js"
+import { createTools, toolDescriptions, toolNames } from "./tools.js"
 
 export class AgentService extends Context.Service<AgentService>()("@app/AgentService", {
   make: Effect.gen(function* () {
@@ -30,15 +31,22 @@ export class AgentService extends Context.Service<AgentService>()("@app/AgentSer
     // getModel is typed with literal generics that require compile-time knowledge
     // of the provider/model pair. Runtime validation above guarantees correctness.
     const model = getModel(provider as any, config.llmModel as any)
-    const bashTool = createBashTool(process.cwd())
+
+    const cwd = process.cwd()
+    const tools = [...createTools(cwd)]
+
+    const systemPrompt = buildSystemPrompt({
+      cwd,
+      date: new Date(),
+      toolNames,
+      toolDescriptions
+    })
 
     const agent = new Agent({
       initialState: {
-        systemPrompt:
-          "You are a helpful assistant that can run shell commands on the user's laptop. " +
-          "Use the bash tool to execute commands and answer the user's questions.",
+        systemPrompt,
         model,
-        tools: [bashTool]
+        tools
       },
       getApiKey: (_provider: string) => Redacted.value(config.apiKey)
     })
