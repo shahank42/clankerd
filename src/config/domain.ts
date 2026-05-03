@@ -8,7 +8,14 @@ export class ConfigFile extends Schema.Class<ConfigFile>("ConfigFile")({
   allowedUsername: Schema.String
 }) {}
 
-export const getConfigPath = (): string => {
+const getBaseDir = (): string => {
+  if (process.env.CLANKERD_DEV === "1") {
+    return `${process.cwd()}/.clankerd-dev`
+  }
   const home = process.env.HOME ?? process.env.USERPROFILE ?? "/tmp"
-  return `${home}/.config/clankerd/config.json`
+  return `${home}/.config/clankerd`
+}
+
+export const getConfigPath = (): string => {
+  return `${getBaseDir()}/config.json`
 }

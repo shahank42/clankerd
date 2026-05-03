@@ -1,63 +1,49 @@
-import { Agent, type AgentEvent } from "@mariozechner/pi-agent-core"
+import { Agent, type AgentEvent, type AgentMessage } from "@mariozechner/pi-agent-core"
 import { getModel, getModels, getProviders } from "@mariozechner/pi-ai"
 import type { KnownProvider } from "@mariozechner/pi-ai"
-import { Cause, Effect, Queue, Redacted, Stream } from "effect"
+import { Cause, Effect, Option, Queue, Redacted, Stream } from "effect"
 import * as Context from "effect/Context"
 import { AppConfig } from "../config/service.js"
+import { MemoryService } from "../memory/service.js"
 import { AgentError } from "./errors.js"
 import { buildSystemPrompt } from "./prompt.js"
 import { createTools, toolDescriptions, toolNames } from "./tools.js"
 
-interface AgentRunState {
-  readonly buffer: string
-  readonly errorMessage: string | undefined
+const estimateTokens = (messages: ReadonlyArray<AgentMessage>): number => {
+  let chars = 0
+  for (const msg of messages) {
+    const content = (msg as any).content
+    if (Array.isArray(content)) {
+      for (const block of content) {
+        if (block.type === "text") chars += String(block.text).length
+      }
+    }
+  }
+  return Math.ceil(chars / 4)
 }
 
 /**
- * Fold stepper that processes each AgentEvent incrementally.
- *
- * Handled events:
- * - tool_execution_start / tool_execution_update / tool_execution_end → logged
- * - message_update (text_delta) → accumulated into buffer
- * - agent_end → type-safe error check on the final AssistantMessage
- *
- * Ignored (pass through):
- * - agent_start, turn_start, turn_end, message_start, message_end
+ * Ensure the sliced array starts with a user message so we never
+ * leave a dangling tool result without its preceding tool_call.
  */
-const processEvent = (state: AgentRunState, event: AgentEvent): Effect.Effect<AgentRunState> =>
-  Effect.gen(function* () {
-    if (event.type === "tool_execution_start") {
-      yield* Effect.log(`Tool start: ${event.toolName}(${JSON.stringify(event.args)})`)
+const safeSlice = (
+  messages: ReadonlyArray<AgentMessage>,
+  startIndex: number
+): Array<AgentMessage> => {
+  for (let i = startIndex; i < messages.length; i++) {
+    if ((messages[i] as any).role === "user") {
+      return messages.slice(i) as Array<AgentMessage>
     }
-
-    if (event.type === "tool_execution_update") {
-      yield* Effect.log(`Tool update: ${event.toolName}`)
-    }
-
-    if (event.type === "tool_execution_end") {
-      yield* Effect.log(`Tool end: ${event.toolName} (error: ${event.isError})`)
-    }
-
-    if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
-      return { ...state, buffer: state.buffer + event.assistantMessageEvent.delta }
-    }
-
-    if (event.type === "agent_end") {
-      const lastMsg = event.messages[event.messages.length - 1]
-      if (
-        lastMsg?.role === "assistant" &&
-        (lastMsg.stopReason === "error" || lastMsg.stopReason === "aborted")
-      ) {
-        return { ...state, errorMessage: lastMsg.errorMessage }
-      }
-    }
-
-    return state
-  })
+  }
+  const lastUserIndex = messages.findLastIndex(m => (m as any).role === "user")
+  if (lastUserIndex >= 0) return messages.slice(lastUserIndex) as Array<AgentMessage>
+  return [...messages] as Array<AgentMessage>
+}
 
 export class AgentService extends Context.Service<AgentService>()("@app/AgentService", {
   make: Effect.gen(function* () {
     const config = yield* AppConfig
+    const memory = yield* MemoryService
 
     const providers = getProviders()
     if (!providers.includes(config.llmProvider as KnownProvider)) {
@@ -98,12 +84,82 @@ export class AgentService extends Context.Service<AgentService>()("@app/AgentSer
       getApiKey: (_provider: string) => Redacted.value(config.apiKey)
     })
 
-    const run = Effect.fn("AgentService.run")(
-      (prompt: string): Effect.Effect<string, AgentError> =>
-        Effect.gen(function* () {
-          yield* Effect.log(`Agent processing prompt (${prompt.length} chars)`)
+    const sessionOpt = yield* memory.loadSession()
+    if (Option.isSome(sessionOpt)) {
+      agent.state.messages = sessionOpt.value.messages as Array<AgentMessage>
+      yield* Effect.log(`Hydrated session with ${agent.state.messages.length} messages`)
+    }
 
-          const result = yield* Stream.callback<AgentEvent, AgentError>(queue =>
+    const persist = Effect.fn("AgentService.persist")(
+      (): Effect.Effect<void> =>
+        memory.persistSession(agent.state.messages).pipe(
+          Effect.tap(() =>
+            Effect.log(`Session persisted (${agent.state.messages.length} messages)`)
+          ),
+          Effect.catch(error => Effect.logWarning(`Session persist failed: ${error}`))
+        )
+    )
+
+    const appendDailyLog = Effect.fn("AgentService.appendDailyLog")(
+      (): Effect.Effect<void> =>
+        memory.appendDailyLog(agent.state.messages).pipe(
+          Effect.tap(() => Effect.log("Daily log appended")),
+          Effect.catch(error => Effect.logWarning(`Daily log append failed: ${error}`))
+        )
+    )
+
+    const newSession = Effect.fn("AgentService.newSession")(
+      (): Effect.Effect<void> =>
+        Effect.gen(function* () {
+          yield* memory.resetSession()
+          agent.state.messages = []
+          yield* Effect.log("Session cleared")
+        }).pipe(Effect.catch(error => Effect.logWarning(`Failed to clear session: ${error}`)))
+    )
+
+    const respawn = Effect.fn("AgentService.respawn")(
+      (): Effect.Effect<void> =>
+        Effect.gen(function* () {
+          yield* memory.respawn()
+          agent.state.messages = []
+          yield* Effect.log("Agent respawned")
+        }).pipe(Effect.catch(error => Effect.logWarning(`Failed to respawn: ${error}`)))
+    )
+
+    const prepareAgent = Effect.fn("AgentService.prepareAgent")(
+      (): Effect.Effect<void> =>
+        Effect.gen(function* () {
+          const newSystemPrompt = yield* memory.buildSystemPrompt()
+          agent.state.systemPrompt = newSystemPrompt
+
+          const maxTokens = 4000
+          const minMessages = 6
+          let tokens = estimateTokens(agent.state.messages)
+          let dropped = 0
+          while (tokens > maxTokens && agent.state.messages.length > minMessages) {
+            agent.state.messages = safeSlice(agent.state.messages, 2)
+            dropped += 2
+            tokens = estimateTokens(agent.state.messages)
+          }
+          if (dropped > 0) {
+            yield* Effect.log(`Truncated messages: dropped ${dropped} old turns (${tokens} tokens)`)
+          }
+
+          const maxMessages = 30
+          if (agent.state.messages.length > maxMessages) {
+            const startIndex = agent.state.messages.length - maxMessages
+            agent.state.messages = safeSlice(agent.state.messages, startIndex)
+            yield* Effect.log(`Capped messages: keeping last ${agent.state.messages.length} turns`)
+          }
+        }).pipe(Effect.catch(error => Effect.logWarning(`Failed to prepare agent: ${error}`)))
+    )
+
+    const runStream = Effect.fn("AgentService.runStream")(
+      (prompt: string): Effect.Effect<Stream.Stream<AgentEvent, AgentError>> =>
+        Effect.gen(function* () {
+          yield* prepareAgent()
+
+          return Stream.callback<AgentEvent, AgentError>(queue =>
             Effect.sync(() => {
               const unsubscribe = agent.subscribe(event => {
                 Queue.offerUnsafe(queue, event)
@@ -122,8 +178,38 @@ export class AgentService extends Context.Service<AgentService>()("@app/AgentSer
 
               return Effect.sync(() => unsubscribe())
             })
-          ).pipe(
-            Stream.runFoldEffect(() => ({ buffer: "", errorMessage: undefined }), processEvent)
+          )
+        })
+    )
+
+    const run = Effect.fn("AgentService.run")(
+      (prompt: string): Effect.Effect<string, AgentError> =>
+        Effect.gen(function* () {
+          yield* Effect.log(`Agent processing prompt (${prompt.length} chars)`)
+
+          const stream = yield* runStream(prompt)
+          const result = yield* stream.pipe(
+            Stream.runFold(
+              () => ({ buffer: "", errorMessage: undefined as string | undefined }),
+              (state, event) => {
+                if (
+                  event.type === "message_update" &&
+                  event.assistantMessageEvent.type === "text_delta"
+                ) {
+                  return { ...state, buffer: state.buffer + event.assistantMessageEvent.delta }
+                }
+                if (event.type === "agent_end") {
+                  const lastMsg = event.messages[event.messages.length - 1]
+                  if (
+                    lastMsg?.role === "assistant" &&
+                    (lastMsg.stopReason === "error" || lastMsg.stopReason === "aborted")
+                  ) {
+                    return { ...state, errorMessage: lastMsg.errorMessage }
+                  }
+                }
+                return state
+              }
+            )
           )
 
           if (result.errorMessage) {
@@ -136,6 +222,6 @@ export class AgentService extends Context.Service<AgentService>()("@app/AgentSer
         })
     )
 
-    return { run }
+    return { run, runStream, persist, appendDailyLog, newSession, respawn }
   })
 }) {}

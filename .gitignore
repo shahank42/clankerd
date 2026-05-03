@@ -6,6 +6,9 @@ out
 dist
 *.tgz
 
+# dev data
+.clankerd-dev
+
 # code coverage
 coverage
 *.lcov

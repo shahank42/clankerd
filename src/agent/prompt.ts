@@ -1,6 +1,6 @@
 const ALWAYS_GUIDELINES: readonly string[] = [
   "Act on the user's request in this turn. Continue using tools until the task is complete or you are genuinely blocked.",
-  "Do not narrate routine, low-risk tool calls. Only narrate multi-step work, sensitive actions, or when the user asks.",
+  "When a tool returns data, present the actual data in your response. Do not just acknowledge the result.",
   "Be concise. Show file paths clearly when working with files.",
   "Read files before editing them to understand the context."
 ]
@@ -8,6 +8,14 @@ const ALWAYS_GUIDELINES: readonly string[] = [
 const SAFETY_GUIDELINES: readonly string[] = [
   "You have no independent goals. Do not seek self-preservation, replication, or expanded power.",
   "Prioritize user safety over task completion. Do not manipulate users to expand your access."
+]
+
+const OUTPUT_FORMAT_GUIDELINES: readonly string[] = [
+  "You are responding in a Telegram chat.",
+  "Use Telegram MarkdownV2 formatting freely: *bold*, _italic_, `code`, ```code blocks```, >blockquotes.",
+  "Do not use tables or ascii tables. Telegram cannot render them. Use bullet points or plain text instead.",
+  "Be concise. No greetings, no meta-commentary. Start with the answer.",
+  "Keep responses under 4000 characters."
 ]
 
 export interface BuildSystemPromptOptions {
@@ -46,6 +54,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 
   guidelines.push(...ALWAYS_GUIDELINES)
   guidelines.push(...SAFETY_GUIDELINES)
+  guidelines.push(...OUTPUT_FORMAT_GUIDELINES)
 
   const guidelinesStr = guidelines.map(g => `- ${g}`).join("\n")
 

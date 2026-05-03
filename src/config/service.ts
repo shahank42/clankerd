@@ -5,7 +5,10 @@ import { ConfigFile, getConfigPath } from "./domain.js"
 import { ConfigNotFound } from "./errors.js"
 import { runInteractiveSetup } from "./setup.js"
 
-const encodeConfig = Schema.encodeSync(Schema.fromJsonString(ConfigFile))
+const encodeConfig = (config: ConfigFile): string => {
+  const raw = Schema.encodeSync(Schema.fromJsonString(ConfigFile))(config)
+  return JSON.stringify(JSON.parse(raw), null, 2)
+}
 
 const writeConfig = (config: ConfigFile) =>
   Effect.gen(function* () {

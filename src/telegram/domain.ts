@@ -31,14 +31,44 @@ export const GetUpdatesResponse = Schema.Struct({
   error_code: Schema.optional(Schema.Number)
 })
 
-export const SendMessageBody = Schema.Struct({
+export const SendMessageBodyMarkdown = Schema.Struct({
+  chat_id: Schema.Number,
+  text: Schema.String,
+  parse_mode: Schema.Literal("MarkdownV2")
+})
+
+export const SendMessageBodyPlain = Schema.Struct({
   chat_id: Schema.Number,
   text: Schema.String
 })
 
 export const SendMessageResponse = Schema.Struct({
   ok: Schema.Boolean,
-  result: Schema.optional(Schema.Unknown),
+  result: Schema.optional(TelegramMessage),
+  description: Schema.optional(Schema.String),
+  error_code: Schema.optional(Schema.Number)
+})
+
+export const DeleteMessageBody = Schema.Struct({
+  chat_id: Schema.Number,
+  message_id: Schema.Number
+})
+
+export const SendChatActionBody = Schema.Struct({
+  chat_id: Schema.Number,
+  action: Schema.String
+})
+
+export const SendMessageDraftBody = Schema.Struct({
+  chat_id: Schema.Number,
+  draft_id: Schema.Number,
+  text: Schema.String,
+  parse_mode: Schema.optional(Schema.String),
+  entities: Schema.optional(Schema.Array(Schema.Unknown))
+})
+
+export const OkResponse = Schema.Struct({
+  ok: Schema.Boolean,
   description: Schema.optional(Schema.String),
   error_code: Schema.optional(Schema.Number)
 })
