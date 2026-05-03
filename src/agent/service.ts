@@ -22,6 +22,24 @@ const estimateTokens = (messages: ReadonlyArray<AgentMessage>): number => {
   return Math.ceil(chars / 4)
 }
 
+/**
+ * Ensure the sliced array starts with a user message so we never
+ * leave a dangling tool result without its preceding tool_call.
+ */
+const safeSlice = (
+  messages: ReadonlyArray<AgentMessage>,
+  startIndex: number
+): Array<AgentMessage> => {
+  for (let i = startIndex; i < messages.length; i++) {
+    if ((messages[i] as any).role === "user") {
+      return messages.slice(i) as Array<AgentMessage>
+    }
+  }
+  const lastUserIndex = messages.findLastIndex(m => (m as any).role === "user")
+  if (lastUserIndex >= 0) return messages.slice(lastUserIndex) as Array<AgentMessage>
+  return [...messages] as Array<AgentMessage>
+}
+
 export class AgentService extends Context.Service<AgentService>()("@app/AgentService", {
   make: Effect.gen(function* () {
     const config = yield* AppConfig
@@ -119,7 +137,7 @@ export class AgentService extends Context.Service<AgentService>()("@app/AgentSer
           let tokens = estimateTokens(agent.state.messages)
           let dropped = 0
           while (tokens > maxTokens && agent.state.messages.length > minMessages) {
-            agent.state.messages = agent.state.messages.slice(2)
+            agent.state.messages = safeSlice(agent.state.messages, 2)
             dropped += 2
             tokens = estimateTokens(agent.state.messages)
           }
@@ -129,11 +147,9 @@ export class AgentService extends Context.Service<AgentService>()("@app/AgentSer
 
           const maxMessages = 30
           if (agent.state.messages.length > maxMessages) {
-            const droppedCap = agent.state.messages.length - maxMessages
-            agent.state.messages = agent.state.messages.slice(-maxMessages)
-            yield* Effect.log(
-              `Capped messages: dropped ${droppedCap} old turns (keeping last ${maxMessages})`
-            )
+            const startIndex = agent.state.messages.length - maxMessages
+            agent.state.messages = safeSlice(agent.state.messages, startIndex)
+            yield* Effect.log(`Capped messages: keeping last ${agent.state.messages.length} turns`)
           }
         }).pipe(Effect.catch(error => Effect.logWarning(`Failed to prepare agent: ${error}`)))
     )

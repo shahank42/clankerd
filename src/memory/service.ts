@@ -42,7 +42,8 @@ Your memory is a tiered system living in ~/.config/clankerd/:
 ### Session Persistence
 - state/session.json — The current conversation transcript.
 - It is automatically saved after every turn and restored on startup.
-- The user can send "/new" to clear it and start fresh.
+- The user can send "/new" to clear the chat and start fresh (keeps memory files).
+- The user can send "/respawn" or "/start" for a full factory reset (wipes everything).
 
 ### Daily Logs
 - memory/YYYY-MM-DD.md — A human-readable markdown log of every turn.
