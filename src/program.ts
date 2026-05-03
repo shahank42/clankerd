@@ -31,6 +31,14 @@ export const program = Effect.gen(function* () {
             const chatId = message.chat.id
             const draftId = message.message_id
 
+            if (text === "/new") {
+              yield* agent.newSession()
+              yield* bot
+                .sendMessage(chatId, "Fresh start.")
+                .pipe(Effect.catch(error => Effect.logWarning(`Send failed: ${error}`)))
+              return
+            }
+
             const executeAction = (action: MessageAction): Effect.Effect<void> =>
               Effect.gen(function* () {
                 switch (action._tag) {

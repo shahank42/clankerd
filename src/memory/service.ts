@@ -30,11 +30,44 @@ const defaultAgents = `# AGENTS.md
 - Prefer grep/find/ls over bash for file exploration.
 - Read files before editing them.
 
-## Memory
-- Your memory lives in ~/.config/clankerd/.
-- If you learn something important about the user, ask: "Should I commit that to memory?"
-- Write personal facts and preferences to ~/.config/clankerd/MEMORY.md.
-- For past conversations, use grep on ~/.config/clankerd/memory/.`
+## Memory System Overview
+
+Your memory is a tiered system living in ~/.config/clankerd/:
+
+### Bootstrap Files (loaded into every system prompt)
+- SOUL.md — Your core personality. Edit sparingly.
+- AGENTS.md — This file. Behavioral rules and conventions.
+- MEMORY.md — Curated long-term facts about the user. YOU maintain this.
+
+### Session Persistence
+- state/session.json — The current conversation transcript.
+- It is automatically saved after every turn and restored on startup.
+- The user can send "/new" to clear it and start fresh.
+
+### Daily Logs
+- memory/YYYY-MM-DD.md — A human-readable markdown log of every turn.
+- Includes user prompt, your reply, and any tools you called.
+- Use grep on this directory to search past conversations.
+
+### Skills (reserved for future)
+- skills/ — Reserved directory for future skill modules.
+- Do not create files here unless explicitly asked.
+
+## Maintaining MEMORY.md
+
+When you learn something important about the user (preferences, facts, context):
+1. Ask: "Should I commit that to memory?"
+2. If they say yes, append the fact to ~/.config/clankerd/MEMORY.md.
+3. Keep entries concise. One fact per line or short paragraph.
+4. Group related facts under markdown headers.
+
+Examples of things to remember:
+- Name, profession, interests
+- Preferences (editor, OS, communication style)
+- Ongoing projects or goals
+- Things they asked you to track
+
+Do NOT write to MEMORY.md without asking first, unless the user explicitly told you to auto-commit.`
 
 const defaultMemory = `# MEMORY.md
 

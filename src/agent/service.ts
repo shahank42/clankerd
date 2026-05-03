@@ -9,6 +9,19 @@ import { AgentError } from "./errors.js"
 import { buildSystemPrompt } from "./prompt.js"
 import { createTools, toolDescriptions, toolNames } from "./tools.js"
 
+const estimateTokens = (messages: ReadonlyArray<AgentMessage>): number => {
+  let chars = 0
+  for (const msg of messages) {
+    const content = (msg as any).content
+    if (Array.isArray(content)) {
+      for (const block of content) {
+        if (block.type === "text") chars += String(block.text).length
+      }
+    }
+  }
+  return Math.ceil(chars / 4)
+}
+
 export class AgentService extends Context.Service<AgentService>()("@app/AgentService", {
   make: Effect.gen(function* () {
     const config = yield* AppConfig
@@ -77,18 +90,40 @@ export class AgentService extends Context.Service<AgentService>()("@app/AgentSer
         )
     )
 
+    const newSession = Effect.fn("AgentService.newSession")(
+      (): Effect.Effect<void> =>
+        Effect.gen(function* () {
+          yield* memory.resetSession()
+          agent.state.messages = []
+          yield* Effect.log("Session cleared")
+        }).pipe(Effect.catch(error => Effect.logWarning(`Failed to clear session: ${error}`)))
+    )
+
     const prepareAgent = Effect.fn("AgentService.prepareAgent")(
       (): Effect.Effect<void> =>
         Effect.gen(function* () {
           const newSystemPrompt = yield* memory.buildSystemPrompt()
           agent.state.systemPrompt = newSystemPrompt
 
+          const maxTokens = 4000
+          const minMessages = 6
+          let tokens = estimateTokens(agent.state.messages)
+          let dropped = 0
+          while (tokens > maxTokens && agent.state.messages.length > minMessages) {
+            agent.state.messages = agent.state.messages.slice(2)
+            dropped += 2
+            tokens = estimateTokens(agent.state.messages)
+          }
+          if (dropped > 0) {
+            yield* Effect.log(`Truncated messages: dropped ${dropped} old turns (${tokens} tokens)`)
+          }
+
           const maxMessages = 30
           if (agent.state.messages.length > maxMessages) {
-            const dropped = agent.state.messages.length - maxMessages
+            const droppedCap = agent.state.messages.length - maxMessages
             agent.state.messages = agent.state.messages.slice(-maxMessages)
             yield* Effect.log(
-              `Capped messages: dropped ${dropped} old turns (keeping last ${maxMessages})`
+              `Capped messages: dropped ${droppedCap} old turns (keeping last ${maxMessages})`
             )
           }
         }).pipe(Effect.catch(error => Effect.logWarning(`Failed to prepare agent: ${error}`)))
@@ -162,6 +197,6 @@ export class AgentService extends Context.Service<AgentService>()("@app/AgentSer
         })
     )
 
-    return { run, runStream, persist, appendDailyLog }
+    return { run, runStream, persist, appendDailyLog, newSession }
   })
 }) {}
