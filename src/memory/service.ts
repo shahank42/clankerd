@@ -22,10 +22,10 @@ const defaultAgents = `# AGENTS.md
 - Read files before editing them.
 
 ## Memory
-- Your memory lives in ~/.clankerd/.
+- Your memory lives in ~/.config/clankerd/.
 - If you learn something important about the user, ask: "Should I commit that to memory?"
-- Write personal facts and preferences to ~/.clankerd/MEMORY.md.
-- For past conversations, use grep on ~/.clankerd/memory/.`
+- Write personal facts and preferences to ~/.config/clankerd/MEMORY.md.
+- For past conversations, use grep on ~/.config/clankerd/memory/.`
 
 const defaultMemory = `# MEMORY.md
 
@@ -142,7 +142,8 @@ export class MemoryService extends Context.Service<MemoryService>()("@app/Memory
         })
 
         const raw = yield* Schema.encodeEffect(Schema.fromJsonString(Session))(session)
-        yield* fs.writeFileString(sessionPath, raw)
+        const pretty = JSON.stringify(JSON.parse(raw), null, 2)
+        yield* fs.writeFileString(sessionPath, pretty)
       }).pipe(
         Effect.mapError(
           error =>

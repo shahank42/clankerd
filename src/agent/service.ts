@@ -1,9 +1,10 @@
-import { Agent, type AgentEvent } from "@mariozechner/pi-agent-core"
+import { Agent, type AgentEvent, type AgentMessage } from "@mariozechner/pi-agent-core"
 import { getModel, getModels, getProviders } from "@mariozechner/pi-ai"
 import type { KnownProvider } from "@mariozechner/pi-ai"
-import { Cause, Effect, Queue, Redacted, Stream } from "effect"
+import { Cause, Effect, Option, Queue, Redacted, Stream } from "effect"
 import * as Context from "effect/Context"
 import { AppConfig } from "../config/service.js"
+import { MemoryService } from "../memory/service.js"
 import { AgentError } from "./errors.js"
 import { buildSystemPrompt } from "./prompt.js"
 import { createTools, toolDescriptions, toolNames } from "./tools.js"
@@ -11,6 +12,7 @@ import { createTools, toolDescriptions, toolNames } from "./tools.js"
 export class AgentService extends Context.Service<AgentService>()("@app/AgentService", {
   make: Effect.gen(function* () {
     const config = yield* AppConfig
+    const memory = yield* MemoryService
 
     const providers = getProviders()
     if (!providers.includes(config.llmProvider as KnownProvider)) {
@@ -50,6 +52,22 @@ export class AgentService extends Context.Service<AgentService>()("@app/AgentSer
       },
       getApiKey: (_provider: string) => Redacted.value(config.apiKey)
     })
+
+    const sessionOpt = yield* memory.loadSession()
+    if (Option.isSome(sessionOpt)) {
+      agent.state.messages = sessionOpt.value.messages as Array<AgentMessage>
+      yield* Effect.log(`Hydrated session with ${agent.state.messages.length} messages`)
+    }
+
+    const persist = Effect.fn("AgentService.persist")(
+      (): Effect.Effect<void> =>
+        memory.persistSession(agent.state.messages).pipe(
+          Effect.tap(() =>
+            Effect.log(`Session persisted (${agent.state.messages.length} messages)`)
+          ),
+          Effect.catch(error => Effect.logWarning(`Session persist failed: ${error}`))
+        )
+    )
 
     const runStream = (prompt: string): Stream.Stream<AgentEvent, AgentError> =>
       Stream.callback<AgentEvent, AgentError>(queue =>
@@ -112,6 +130,6 @@ export class AgentService extends Context.Service<AgentService>()("@app/AgentSer
         })
     )
 
-    return { run, runStream }
+    return { run, runStream, persist }
   })
 }) {}

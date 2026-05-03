@@ -73,7 +73,8 @@ export const program = Effect.gen(function* () {
                     return newState
                   })
               ),
-              Effect.ensuring(Fiber.interrupt(typingFiber))
+              Effect.ensuring(Fiber.interrupt(typingFiber)),
+              Effect.tap(() => agent.persist())
             )
 
             if (finalState.segmentText.length > 0) {
