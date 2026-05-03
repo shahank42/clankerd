@@ -7,6 +7,15 @@ import { MemoryReadError, MemoryWriteError } from "./errors.js"
 
 const MAX_MEMORY_MD_CHARS = 3000
 
+const extractText = (msg: AgentMessage): string => {
+  const content = (msg as any).content
+  if (!content || !Array.isArray(content)) return ""
+  return content
+    .filter((c: any) => c.type === "text")
+    .map((c: any) => c.text)
+    .join("")
+}
+
 const defaultSoul = `You are a helpful personal assistant running on the user's laptop.
 You are warm, efficient, and have a dry sense of humor.
 You remember details about the user's life and reference them naturally.`
@@ -151,8 +160,63 @@ export class MemoryService extends Context.Service<MemoryService>()("@app/Memory
         )
       )
 
-    const appendDailyLog = (_messages: ReadonlyArray<AgentMessage>): Effect.Effect<void> =>
-      Effect.void
+    const formatTurn = (messages: ReadonlyArray<AgentMessage>): string => {
+      const lastUserIndex = messages.findLastIndex(m => m.role === "user")
+      if (lastUserIndex < 0) return ""
+
+      const userMsg = messages[lastUserIndex]!
+      const userText = extractText(userMsg)
+
+      const turnMessages = messages.slice(lastUserIndex + 1)
+      const assistantMsgs = turnMessages.filter(m => m.role === "assistant")
+      const assistantText = assistantMsgs.map(extractText).join("")
+
+      const toolCalls: Array<string> = []
+      for (const msg of assistantMsgs) {
+        const content = (msg as any).content
+        if (!content || !Array.isArray(content)) continue
+        for (const block of content) {
+          if (block.type === "toolCall") {
+            const tc = block.toolCall
+            toolCalls.push(`${tc.name}(${JSON.stringify(tc.args)})`)
+          }
+        }
+      }
+
+      const time = new Date((userMsg as any).timestamp ?? Date.now()).toLocaleTimeString("en-US", {
+        hour: "2-digit",
+        minute: "2-digit"
+      })
+
+      const lines: Array<string> = [`## ${time}`, "", `**User:** ${userText}`]
+      if (assistantText) {
+        lines.push("", `**Assistant:** ${assistantText}`)
+      }
+      if (toolCalls.length > 0) {
+        lines.push("", "**Tools:**")
+        for (const tc of toolCalls) {
+          lines.push(`- ${tc}`)
+        }
+      }
+
+      return lines.join("\n")
+    }
+
+    const appendDailyLog = (messages: ReadonlyArray<AgentMessage>): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        if (messages.length === 0) return
+
+        const entry = formatTurn(messages)
+        if (!entry) return
+
+        const date = new Date().toISOString().slice(0, 10)
+        const logPath = `${logsDir}/${date}.md`
+
+        const existing = yield* readFileOrEmpty(logPath)
+        const updated = existing ? `${existing}\n\n---\n\n${entry}` : `# ${date}\n\n${entry}`
+
+        yield* fs.writeFileString(logPath, updated)
+      }).pipe(Effect.orElseSucceed(() => undefined))
 
     yield* ensureDirectoryStructure()
 

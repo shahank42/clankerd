@@ -69,6 +69,14 @@ export class AgentService extends Context.Service<AgentService>()("@app/AgentSer
         )
     )
 
+    const appendDailyLog = Effect.fn("AgentService.appendDailyLog")(
+      (): Effect.Effect<void> =>
+        memory.appendDailyLog(agent.state.messages).pipe(
+          Effect.tap(() => Effect.log("Daily log appended")),
+          Effect.catch(error => Effect.logWarning(`Daily log append failed: ${error}`))
+        )
+    )
+
     const prepareAgent = Effect.fn("AgentService.prepareAgent")(
       (): Effect.Effect<void> =>
         Effect.gen(function* () {
@@ -154,6 +162,6 @@ export class AgentService extends Context.Service<AgentService>()("@app/AgentSer
         })
     )
 
-    return { run, runStream, persist }
+    return { run, runStream, persist, appendDailyLog }
   })
 }) {}

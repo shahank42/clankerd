@@ -75,7 +75,8 @@ export const program = Effect.gen(function* () {
                   })
               ),
               Effect.ensuring(Fiber.interrupt(typingFiber)),
-              Effect.tap(() => agent.persist())
+              Effect.tap(() => agent.persist()),
+              Effect.tap(() => agent.appendDailyLog())
             )
 
             if (finalState.segmentText.length > 0) {
