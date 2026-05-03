@@ -96,6 +96,9 @@ export class MemoryService extends Context.Service<MemoryService>()("@app/Memory
         yield* fs.writeFileString(path, content)
       }).pipe(Effect.orElseSucceed(() => undefined))
 
+    const writeFileForce = (path: string, content: string): Effect.Effect<void> =>
+      fs.writeFileString(path, content).pipe(Effect.orElseSucceed(() => undefined))
+
     const ensureDirectoryStructure = (): Effect.Effect<void> =>
       Effect.gen(function* () {
         yield* fs.makeDirectory(memoryDir, { recursive: true })
@@ -250,6 +253,24 @@ export class MemoryService extends Context.Service<MemoryService>()("@app/Memory
         yield* fs.writeFileString(logPath, updated)
       }).pipe(Effect.orElseSucceed(() => undefined))
 
+    const respawn = (): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        yield* resetSession()
+
+        const logFiles = yield* fs.readDirectory(logsDir).pipe(Effect.orElseSucceed(() => []))
+        for (const file of logFiles) {
+          yield* fs
+            .remove(`${logsDir}/${file}`, { force: true })
+            .pipe(Effect.orElseSucceed(() => undefined))
+        }
+
+        yield* writeFileForce(`${memoryDir}/SOUL.md`, defaultSoul)
+        yield* writeFileForce(`${memoryDir}/AGENTS.md`, defaultAgents)
+        yield* writeFileForce(`${memoryDir}/MEMORY.md`, defaultMemory)
+
+        yield* Effect.log("Memory respawned: session, logs, and bootstrap files reset")
+      }).pipe(Effect.orElseSucceed(() => undefined))
+
     yield* ensureDirectoryStructure()
 
     return {
@@ -259,7 +280,8 @@ export class MemoryService extends Context.Service<MemoryService>()("@app/Memory
       resetSession,
       loadSession,
       persistSession,
-      appendDailyLog
+      appendDailyLog,
+      respawn
     }
   })
 }) {}

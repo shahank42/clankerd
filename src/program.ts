@@ -56,6 +56,28 @@ export const program = Effect.gen(function* () {
               return
             }
 
+            if (text === "/respawn" || text === "/start") {
+              const ids = yield* Ref.get(messageIdsRef)
+              yield* Effect.forEach(
+                ids,
+                id =>
+                  bot.deleteMessage(chatId, id).pipe(
+                    Effect.tapError(error =>
+                      Effect.logWarning(`Delete failed for msg ${id}: ${error}`)
+                    ),
+                    Effect.orElseSucceed(() => undefined)
+                  ),
+                { discard: true }
+              )
+              yield* agent.respawn()
+              const freshId = yield* bot.sendMessage(chatId, "Respawned.").pipe(
+                Effect.tapError(error => Effect.logWarning(`Send failed: ${error}`)),
+                Effect.orElseSucceed(() => undefined)
+              )
+              yield* Ref.set(messageIdsRef, freshId !== undefined ? [freshId] : [])
+              return
+            }
+
             const executeAction = (action: MessageAction): Effect.Effect<number | undefined> =>
               Effect.gen(function* () {
                 switch (action._tag) {

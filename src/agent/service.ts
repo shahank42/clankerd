@@ -99,6 +99,15 @@ export class AgentService extends Context.Service<AgentService>()("@app/AgentSer
         }).pipe(Effect.catch(error => Effect.logWarning(`Failed to clear session: ${error}`)))
     )
 
+    const respawn = Effect.fn("AgentService.respawn")(
+      (): Effect.Effect<void> =>
+        Effect.gen(function* () {
+          yield* memory.respawn()
+          agent.state.messages = []
+          yield* Effect.log("Agent respawned")
+        }).pipe(Effect.catch(error => Effect.logWarning(`Failed to respawn: ${error}`)))
+    )
+
     const prepareAgent = Effect.fn("AgentService.prepareAgent")(
       (): Effect.Effect<void> =>
         Effect.gen(function* () {
@@ -197,6 +206,6 @@ export class AgentService extends Context.Service<AgentService>()("@app/AgentSer
         })
     )
 
-    return { run, runStream, persist, appendDailyLog, newSession }
+    return { run, runStream, persist, appendDailyLog, newSession, respawn }
   })
 }) {}
