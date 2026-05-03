@@ -10,6 +10,7 @@ export const program = Effect.gen(function* () {
   const config = yield* AppConfig
 
   const offsetRef = yield* Ref.make(0)
+  const messageIdsRef = yield* Ref.make<ReadonlyArray<number>>([])
 
   yield* Effect.repeat(
     Effect.gen(function* () {
@@ -31,28 +32,48 @@ export const program = Effect.gen(function* () {
             const chatId = message.chat.id
             const draftId = message.message_id
 
+            yield* Ref.update(messageIdsRef, ids => [...ids, message.message_id])
+
             if (text === "/new") {
+              const ids = yield* Ref.get(messageIdsRef)
+              yield* Effect.forEach(
+                ids,
+                id =>
+                  bot.deleteMessage(chatId, id).pipe(
+                    Effect.tapError(error =>
+                      Effect.logWarning(`Delete failed for msg ${id}: ${error}`)
+                    ),
+                    Effect.orElseSucceed(() => undefined)
+                  ),
+                { discard: true }
+              )
               yield* agent.newSession()
-              yield* bot
-                .sendMessage(chatId, "Fresh start.")
-                .pipe(Effect.catch(error => Effect.logWarning(`Send failed: ${error}`)))
+              const freshId = yield* bot.sendMessage(chatId, "Fresh start.").pipe(
+                Effect.tapError(error => Effect.logWarning(`Send failed: ${error}`)),
+                Effect.orElseSucceed(() => undefined)
+              )
+              yield* Ref.set(messageIdsRef, freshId !== undefined ? [freshId] : [])
               return
             }
 
-            const executeAction = (action: MessageAction): Effect.Effect<void> =>
+            const executeAction = (action: MessageAction): Effect.Effect<number | undefined> =>
               Effect.gen(function* () {
                 switch (action._tag) {
-                  case "SendMessage":
-                    yield* bot.sendMessage(chatId, action.text)
-                    break
-                  case "UpdateDraft":
+                  case "SendMessage": {
+                    return yield* bot.sendMessage(chatId, action.text)
+                  }
+                  case "UpdateDraft": {
                     yield* bot.sendMessageDraft(chatId, draftId, action.text)
-                    break
-                  case "SendError":
-                    yield* bot.sendMessage(chatId, action.text)
-                    break
+                    return undefined
+                  }
+                  case "SendError": {
+                    return yield* bot.sendMessage(chatId, action.text)
+                  }
                 }
-              }).pipe(Effect.catch(error => Effect.logWarning(`Action failed: ${error}`)))
+              }).pipe(
+                Effect.tapError(error => Effect.logWarning(`Action failed: ${error}`)),
+                Effect.orElseSucceed(() => undefined)
+              )
 
             const typingFiber = yield* Effect.repeat(
               bot.sendChatAction(chatId, "typing"),
@@ -78,7 +99,13 @@ export const program = Effect.gen(function* () {
                     }
 
                     const [newState, actions] = transition(state, event)
-                    yield* Effect.forEach(actions, executeAction, { discard: true })
+                    const sentIds = yield* Effect.forEach(actions, executeAction, {
+                      discard: false
+                    })
+                    yield* Ref.update(messageIdsRef, ids => [
+                      ...ids,
+                      ...sentIds.filter((id): id is number => id !== undefined)
+                    ])
                     return newState
                   })
               ),
@@ -88,9 +115,13 @@ export const program = Effect.gen(function* () {
             )
 
             if (finalState.segmentText.length > 0) {
-              yield* bot
-                .sendMessage(chatId, finalState.segmentText)
-                .pipe(Effect.catch(error => Effect.logWarning(`Final flush failed: ${error}`)))
+              const finalId = yield* bot.sendMessage(chatId, finalState.segmentText).pipe(
+                Effect.tapError(error => Effect.logWarning(`Final flush failed: ${error}`)),
+                Effect.orElseSucceed(() => undefined)
+              )
+              if (finalId !== undefined) {
+                yield* Ref.update(messageIdsRef, ids => [...ids, finalId])
+              }
             }
           }).pipe(Effect.catch(error => Effect.logError(`Failed to process update: ${error}`))),
         { discard: true }

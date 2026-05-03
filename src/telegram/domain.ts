@@ -44,9 +44,14 @@ export const SendMessageBodyPlain = Schema.Struct({
 
 export const SendMessageResponse = Schema.Struct({
   ok: Schema.Boolean,
-  result: Schema.optional(Schema.Unknown),
+  result: Schema.optional(TelegramMessage),
   description: Schema.optional(Schema.String),
   error_code: Schema.optional(Schema.Number)
+})
+
+export const DeleteMessageBody = Schema.Struct({
+  chat_id: Schema.Number,
+  message_id: Schema.Number
 })
 
 export const SendChatActionBody = Schema.Struct({
