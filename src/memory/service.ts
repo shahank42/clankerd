@@ -209,9 +209,8 @@ export class MemoryService extends Context.Service<MemoryService>()("@app/Memory
         const content = (msg as any).content
         if (!content || !Array.isArray(content)) continue
         for (const block of content) {
-          if (block.type === "toolCall") {
-            const tc = block.toolCall
-            toolCalls.push(`${tc.name}(${JSON.stringify(tc.args)})`)
+          if (block.type === "toolCall" && block.name) {
+            toolCalls.push(`${block.name}(${JSON.stringify(block.arguments ?? block.args)})`)
           }
         }
       }
