@@ -52,30 +52,34 @@ export const program = Effect.gen(function* () {
             ).pipe(Effect.forkDetach)
 
             const finalState = yield* agent.runStream(text).pipe(
-              Stream.runFoldEffect(() => initialState, (state, event) =>
-                Effect.gen(function* () {
-                  if (event.type === "tool_execution_start") {
-                    yield* Effect.log(`Tool start: ${event.toolName}(${JSON.stringify(event.args)})`)
-                  }
-                  if (event.type === "tool_execution_update") {
-                    yield* Effect.log(`Tool update: ${event.toolName}`)
-                  }
-                  if (event.type === "tool_execution_end") {
-                    yield* Effect.log(`Tool end: ${event.toolName} (error: ${event.isError})`)
-                  }
+              Stream.runFoldEffect(
+                () => initialState,
+                (state, event) =>
+                  Effect.gen(function* () {
+                    if (event.type === "tool_execution_start") {
+                      yield* Effect.log(
+                        `Tool start: ${event.toolName}(${JSON.stringify(event.args)})`
+                      )
+                    }
+                    if (event.type === "tool_execution_update") {
+                      yield* Effect.log(`Tool update: ${event.toolName}`)
+                    }
+                    if (event.type === "tool_execution_end") {
+                      yield* Effect.log(`Tool end: ${event.toolName} (error: ${event.isError})`)
+                    }
 
-                  const [newState, actions] = transition(state, event)
-                  yield* Effect.forEach(actions, executeAction, { discard: true })
-                  return newState
-                })
+                    const [newState, actions] = transition(state, event)
+                    yield* Effect.forEach(actions, executeAction, { discard: true })
+                    return newState
+                  })
               ),
               Effect.ensuring(Fiber.interrupt(typingFiber))
             )
 
             if (finalState.segmentText.length > 0) {
-              yield* bot.sendMessage(chatId, finalState.segmentText).pipe(
-                Effect.catch(error => Effect.logWarning(`Final flush failed: ${error}`))
-              )
+              yield* bot
+                .sendMessage(chatId, finalState.segmentText)
+                .pipe(Effect.catch(error => Effect.logWarning(`Final flush failed: ${error}`)))
             }
           }).pipe(Effect.catch(error => Effect.logError(`Failed to process update: ${error}`))),
         { discard: true }
