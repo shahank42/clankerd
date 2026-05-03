@@ -8,56 +8,6 @@ import { AgentError } from "./errors.js"
 import { buildSystemPrompt } from "./prompt.js"
 import { createTools, toolDescriptions, toolNames } from "./tools.js"
 
-export interface AgentRunState {
-  readonly buffer: string
-  readonly errorMessage: string | undefined
-}
-
-/**
- * Fold stepper that processes each AgentEvent incrementally.
- *
- * Handled events:
- * - tool_execution_start / tool_execution_update / tool_execution_end → logged
- * - message_update (text_delta) → accumulated into buffer
- * - agent_end → type-safe error check on the final AssistantMessage
- *
- * Ignored (pass through):
- * - agent_start, turn_start, turn_end, message_start, message_end
- */
-export const processEvent = (
-  state: AgentRunState,
-  event: AgentEvent
-): Effect.Effect<AgentRunState> =>
-  Effect.gen(function* () {
-    if (event.type === "tool_execution_start") {
-      yield* Effect.log(`Tool start: ${event.toolName}(${JSON.stringify(event.args)})`)
-    }
-
-    if (event.type === "tool_execution_update") {
-      yield* Effect.log(`Tool update: ${event.toolName}`)
-    }
-
-    if (event.type === "tool_execution_end") {
-      yield* Effect.log(`Tool end: ${event.toolName} (error: ${event.isError})`)
-    }
-
-    if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
-      return { ...state, buffer: state.buffer + event.assistantMessageEvent.delta }
-    }
-
-    if (event.type === "agent_end") {
-      const lastMsg = event.messages[event.messages.length - 1]
-      if (
-        lastMsg?.role === "assistant" &&
-        (lastMsg.stopReason === "error" || lastMsg.stopReason === "aborted")
-      ) {
-        return { ...state, errorMessage: lastMsg.errorMessage }
-      }
-    }
-
-    return state
-  })
-
 export class AgentService extends Context.Service<AgentService>()("@app/AgentService", {
   make: Effect.gen(function* () {
     const config = yield* AppConfig
@@ -129,7 +79,27 @@ export class AgentService extends Context.Service<AgentService>()("@app/AgentSer
           yield* Effect.log(`Agent processing prompt (${prompt.length} chars)`)
 
           const result = yield* runStream(prompt).pipe(
-            Stream.runFoldEffect(() => ({ buffer: "", errorMessage: undefined }), processEvent)
+            Stream.runFold(
+              () => ({ buffer: "", errorMessage: undefined as string | undefined }),
+              (state, event) => {
+                if (
+                  event.type === "message_update" &&
+                  event.assistantMessageEvent.type === "text_delta"
+                ) {
+                  return { ...state, buffer: state.buffer + event.assistantMessageEvent.delta }
+                }
+                if (event.type === "agent_end") {
+                  const lastMsg = event.messages[event.messages.length - 1]
+                  if (
+                    lastMsg?.role === "assistant" &&
+                    (lastMsg.stopReason === "error" || lastMsg.stopReason === "aborted")
+                  ) {
+                    return { ...state, errorMessage: lastMsg.errorMessage }
+                  }
+                }
+                return state
+              }
+            )
           )
 
           if (result.errorMessage) {

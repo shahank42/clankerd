@@ -1,8 +1,8 @@
-import { Effect, Ref, Schedule, Stream } from "effect"
-import { AgentService, processEvent } from "./agent/service.js"
-import { toolDisplayNames } from "./agent/tools.js"
+import { Effect, Fiber, Ref, Schedule, Stream } from "effect"
+import { AgentService } from "./agent/service.js"
 import { AppConfig } from "./config/service.js"
 import { TelegramBot } from "./telegram/service.js"
+import { initialState, transition, type MessageAction } from "./stream-processor.js"
 
 export const program = Effect.gen(function* () {
   const bot = yield* TelegramBot
@@ -28,34 +28,54 @@ export const program = Effect.gen(function* () {
 
             yield* Effect.log(`Received: ${text}`)
 
+            const chatId = message.chat.id
             const draftId = message.message_id
 
-            yield* bot
-              .sendMessageDraft(message.chat.id, draftId, "Thinking...")
-              .pipe(Effect.catch(error => Effect.logWarning(`Initial draft failed: ${error}`)))
+            const executeAction = (action: MessageAction): Effect.Effect<void> =>
+              Effect.gen(function* () {
+                switch (action._tag) {
+                  case "SendMessage":
+                    yield* bot.sendMessage(chatId, action.text)
+                    break
+                  case "UpdateDraft":
+                    yield* bot.sendMessageDraft(chatId, draftId, action.text)
+                    break
+                  case "SendError":
+                    yield* bot.sendMessage(chatId, action.text)
+                    break
+                }
+              }).pipe(Effect.catch(error => Effect.logWarning(`Action failed: ${error}`)))
 
-            const result = yield* agent.runStream(text).pipe(
-              Stream.tap(event =>
+            const typingFiber = yield* Effect.repeat(
+              bot.sendChatAction(chatId, "typing"),
+              Schedule.spaced("4 seconds")
+            ).pipe(Effect.forkDetach)
+
+            const finalState = yield* agent.runStream(text).pipe(
+              Stream.runFoldEffect(() => initialState, (state, event) =>
                 Effect.gen(function* () {
                   if (event.type === "tool_execution_start") {
-                    const displayName = toolDisplayNames[event.toolName]
-                    if (displayName) {
-                      yield* bot
-                        .sendMessageDraft(message.chat.id, draftId, displayName)
-                        .pipe(
-                          Effect.catch(error => Effect.logWarning(`Draft update failed: ${error}`))
-                        )
-                    }
+                    yield* Effect.log(`Tool start: ${event.toolName}(${JSON.stringify(event.args)})`)
                   }
+                  if (event.type === "tool_execution_update") {
+                    yield* Effect.log(`Tool update: ${event.toolName}`)
+                  }
+                  if (event.type === "tool_execution_end") {
+                    yield* Effect.log(`Tool end: ${event.toolName} (error: ${event.isError})`)
+                  }
+
+                  const [newState, actions] = transition(state, event)
+                  yield* Effect.forEach(actions, executeAction, { discard: true })
+                  return newState
                 })
               ),
-              Stream.runFoldEffect(() => ({ buffer: "", errorMessage: undefined }), processEvent)
+              Effect.ensuring(Fiber.interrupt(typingFiber))
             )
 
-            if (result.errorMessage) {
-              yield* bot.sendMessage(message.chat.id, `❌ ${result.errorMessage}`)
-            } else {
-              yield* bot.sendMessage(message.chat.id, result.buffer)
+            if (finalState.segmentText.length > 0) {
+              yield* bot.sendMessage(chatId, finalState.segmentText).pipe(
+                Effect.catch(error => Effect.logWarning(`Final flush failed: ${error}`))
+              )
             }
           }).pipe(Effect.catch(error => Effect.logError(`Failed to process update: ${error}`))),
         { discard: true }
