@@ -69,34 +69,58 @@ export class AgentService extends Context.Service<AgentService>()("@app/AgentSer
         )
     )
 
-    const runStream = (prompt: string): Stream.Stream<AgentEvent, AgentError> =>
-      Stream.callback<AgentEvent, AgentError>(queue =>
-        Effect.sync(() => {
-          const unsubscribe = agent.subscribe(event => {
-            Queue.offerUnsafe(queue, event)
-            if (event.type === "agent_end") {
-              Queue.endUnsafe(queue)
-            }
-          })
+    const prepareAgent = Effect.fn("AgentService.prepareAgent")(
+      (): Effect.Effect<void> =>
+        Effect.gen(function* () {
+          const newSystemPrompt = yield* memory.buildSystemPrompt()
+          agent.state.systemPrompt = newSystemPrompt
 
-          try {
-            agent.prompt(prompt).catch(err => {
-              Queue.failCauseUnsafe(queue, Cause.fail(new AgentError({ message: String(err) })))
-            })
-          } catch (err) {
-            Queue.failCauseUnsafe(queue, Cause.fail(new AgentError({ message: String(err) })))
+          const maxMessages = 30
+          if (agent.state.messages.length > maxMessages) {
+            const dropped = agent.state.messages.length - maxMessages
+            agent.state.messages = agent.state.messages.slice(-maxMessages)
+            yield* Effect.log(
+              `Capped messages: dropped ${dropped} old turns (keeping last ${maxMessages})`
+            )
           }
+        }).pipe(Effect.catch(error => Effect.logWarning(`Failed to prepare agent: ${error}`)))
+    )
 
-          return Effect.sync(() => unsubscribe())
+    const runStream = Effect.fn("AgentService.runStream")(
+      (prompt: string): Effect.Effect<Stream.Stream<AgentEvent, AgentError>> =>
+        Effect.gen(function* () {
+          yield* prepareAgent()
+
+          return Stream.callback<AgentEvent, AgentError>(queue =>
+            Effect.sync(() => {
+              const unsubscribe = agent.subscribe(event => {
+                Queue.offerUnsafe(queue, event)
+                if (event.type === "agent_end") {
+                  Queue.endUnsafe(queue)
+                }
+              })
+
+              try {
+                agent.prompt(prompt).catch(err => {
+                  Queue.failCauseUnsafe(queue, Cause.fail(new AgentError({ message: String(err) })))
+                })
+              } catch (err) {
+                Queue.failCauseUnsafe(queue, Cause.fail(new AgentError({ message: String(err) })))
+              }
+
+              return Effect.sync(() => unsubscribe())
+            })
+          )
         })
-      )
+    )
 
     const run = Effect.fn("AgentService.run")(
       (prompt: string): Effect.Effect<string, AgentError> =>
         Effect.gen(function* () {
           yield* Effect.log(`Agent processing prompt (${prompt.length} chars)`)
 
-          const result = yield* runStream(prompt).pipe(
+          const stream = yield* runStream(prompt)
+          const result = yield* stream.pipe(
             Stream.runFold(
               () => ({ buffer: "", errorMessage: undefined as string | undefined }),
               (state, event) => {

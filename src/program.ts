@@ -51,7 +51,8 @@ export const program = Effect.gen(function* () {
               Schedule.spaced("4 seconds")
             ).pipe(Effect.forkDetach)
 
-            const finalState = yield* agent.runStream(text).pipe(
+            const stream = yield* agent.runStream(text)
+            const finalState = yield* stream.pipe(
               Stream.runFoldEffect(
                 () => initialState,
                 (state, event) =>
