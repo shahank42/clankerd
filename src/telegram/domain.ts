@@ -42,3 +42,22 @@ export const SendMessageResponse = Schema.Struct({
   description: Schema.optional(Schema.String),
   error_code: Schema.optional(Schema.Number)
 })
+
+export const SendChatActionBody = Schema.Struct({
+  chat_id: Schema.Number,
+  action: Schema.String
+})
+
+export const SendMessageDraftBody = Schema.Struct({
+  chat_id: Schema.Number,
+  draft_id: Schema.Number,
+  text: Schema.String,
+  parse_mode: Schema.optional(Schema.String),
+  entities: Schema.optional(Schema.Array(Schema.Unknown))
+})
+
+export const OkResponse = Schema.Struct({
+  ok: Schema.Boolean,
+  description: Schema.optional(Schema.String),
+  error_code: Schema.optional(Schema.Number)
+})

@@ -6,7 +6,10 @@ import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 import { AppConfig } from "../config/service.js"
 import {
   GetUpdatesResponse,
+  OkResponse,
+  SendChatActionBody,
   SendMessageBody,
+  SendMessageDraftBody,
   SendMessageResponse,
   TelegramUpdate
 } from "./domain.js"
@@ -64,7 +67,43 @@ export class TelegramBot extends Context.Service<TelegramBot>()("@app/TelegramBo
         }).pipe(Effect.mapError(error => new TelegramError({ message: String(error) })))
     )
 
-    return { getUpdates, sendMessage }
+    const sendChatAction = Effect.fn("TelegramBot.sendChatAction")(
+      (chatId: number, action: string): Effect.Effect<void, TelegramError> =>
+        Effect.gen(function* () {
+          const request = yield* HttpClientRequest.post(`${baseUrl}/sendChatAction`).pipe(
+            HttpClientRequest.schemaBodyJson(SendChatActionBody)({ chat_id: chatId, action })
+          )
+          const response = yield* client.execute(request)
+          const data = yield* HttpClientResponse.schemaBodyJson(OkResponse)(response)
+          if (!data.ok) {
+            return yield* new TelegramError({
+              message: data.description ?? "Unknown Telegram error"
+            })
+          }
+        }).pipe(Effect.mapError(error => new TelegramError({ message: String(error) })))
+    )
+
+    const sendMessageDraft = Effect.fn("TelegramBot.sendMessageDraft")(
+      (chatId: number, draftId: number, text: string): Effect.Effect<void, TelegramError> =>
+        Effect.gen(function* () {
+          const request = yield* HttpClientRequest.post(`${baseUrl}/sendMessageDraft`).pipe(
+            HttpClientRequest.schemaBodyJson(SendMessageDraftBody)({
+              chat_id: chatId,
+              draft_id: draftId,
+              text
+            })
+          )
+          const response = yield* client.execute(request)
+          const data = yield* HttpClientResponse.schemaBodyJson(OkResponse)(response)
+          if (!data.ok) {
+            return yield* new TelegramError({
+              message: data.description ?? "Unknown Telegram error"
+            })
+          }
+        }).pipe(Effect.mapError(error => new TelegramError({ message: String(error) })))
+    )
+
+    return { getUpdates, sendMessage, sendChatAction, sendMessageDraft }
   })
 }) {}
 

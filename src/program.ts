@@ -1,5 +1,6 @@
-import { Effect, Ref, Schedule } from "effect"
-import { AgentService } from "./agent/service.js"
+import { Effect, Ref, Schedule, Stream } from "effect"
+import { AgentService, processEvent } from "./agent/service.js"
+import { toolDisplayNames } from "./agent/tools.js"
 import { AppConfig } from "./config/service.js"
 import { TelegramBot } from "./telegram/service.js"
 
@@ -26,8 +27,36 @@ export const program = Effect.gen(function* () {
             if (!text) return
 
             yield* Effect.log(`Received: ${text}`)
-            const reply = yield* agent.run(text)
-            yield* bot.sendMessage(message.chat.id, reply)
+
+            const draftId = message.message_id
+
+            yield* bot
+              .sendMessageDraft(message.chat.id, draftId, "Thinking...")
+              .pipe(Effect.catch(error => Effect.logWarning(`Initial draft failed: ${error}`)))
+
+            const result = yield* agent.runStream(text).pipe(
+              Stream.tap(event =>
+                Effect.gen(function* () {
+                  if (event.type === "tool_execution_start") {
+                    const displayName = toolDisplayNames[event.toolName]
+                    if (displayName) {
+                      yield* bot
+                        .sendMessageDraft(message.chat.id, draftId, displayName)
+                        .pipe(
+                          Effect.catch(error => Effect.logWarning(`Draft update failed: ${error}`))
+                        )
+                    }
+                  }
+                })
+              ),
+              Stream.runFoldEffect(() => ({ buffer: "", errorMessage: undefined }), processEvent)
+            )
+
+            if (result.errorMessage) {
+              yield* bot.sendMessage(message.chat.id, `❌ ${result.errorMessage}`)
+            } else {
+              yield* bot.sendMessage(message.chat.id, result.buffer)
+            }
           }).pipe(Effect.catch(error => Effect.logError(`Failed to process update: ${error}`))),
         { discard: true }
       )
