@@ -8,12 +8,14 @@ import {
   GetUpdatesResponse,
   OkResponse,
   SendChatActionBody,
-  SendMessageBody,
+  SendMessageBodyMarkdown,
+  SendMessageBodyPlain,
   SendMessageDraftBody,
   SendMessageResponse,
   TelegramUpdate
 } from "./domain.js"
 import { TelegramError } from "./errors.js"
+import { sanitizeMarkdownV2 } from "./markdown.js"
 
 export class TelegramBot extends Context.Service<TelegramBot>()("@app/TelegramBot", {
   make: Effect.gen(function* () {
@@ -53,18 +55,57 @@ export class TelegramBot extends Context.Service<TelegramBot>()("@app/TelegramBo
     const sendMessage = Effect.fn("TelegramBot.sendMessage")(
       (chatId: number, text: string): Effect.Effect<void, TelegramError> =>
         Effect.gen(function* () {
-          yield* Effect.log(`Sending message to chat ${chatId} (${text.length} chars)`)
-          const request = yield* HttpClientRequest.post(`${baseUrl}/sendMessage`).pipe(
-            HttpClientRequest.schemaBodyJson(SendMessageBody)({ chat_id: chatId, text })
+          const safeText = sanitizeMarkdownV2(text)
+          const truncated = safeText.length > 4096 ? safeText.slice(0, 4096) : safeText
+          yield* Effect.log(`Sending message to chat ${chatId} (${truncated.length} chars)`)
+
+          const sendMarkdown = Effect.gen(function* () {
+            const request = yield* HttpClientRequest.post(`${baseUrl}/sendMessage`).pipe(
+              HttpClientRequest.schemaBodyJson(SendMessageBodyMarkdown)({
+                chat_id: chatId,
+                text: truncated,
+                parse_mode: "MarkdownV2"
+              })
+            )
+            const response = yield* client.execute(request)
+            const data = yield* HttpClientResponse.schemaBodyJson(SendMessageResponse)(response)
+            if (!data.ok) {
+              return yield* new TelegramError({
+                message: data.description ?? "Unknown Telegram error"
+              })
+            }
+          }).pipe(Effect.mapError(error => new TelegramError({ message: String(error) })))
+
+          const sendPlain = Effect.gen(function* () {
+            yield* Effect.log(
+              `Sending plain text fallback to chat ${chatId} (${truncated.length} chars)`
+            )
+            const request = yield* HttpClientRequest.post(`${baseUrl}/sendMessage`).pipe(
+              HttpClientRequest.schemaBodyJson(SendMessageBodyPlain)({
+                chat_id: chatId,
+                text: truncated
+              })
+            )
+            const response = yield* client.execute(request)
+            const data = yield* HttpClientResponse.schemaBodyJson(SendMessageResponse)(response)
+            if (!data.ok) {
+              return yield* new TelegramError({
+                message: data.description ?? "Unknown Telegram error"
+              })
+            }
+          }).pipe(Effect.mapError(error => new TelegramError({ message: String(error) })))
+
+          yield* sendMarkdown.pipe(
+            Effect.catch((error: TelegramError) =>
+              Effect.gen(function* () {
+                yield* Effect.logWarning(
+                  `MarkdownV2 failed: ${error.message}, falling back to plain text`
+                )
+                yield* sendPlain
+              })
+            )
           )
-          const response = yield* client.execute(request)
-          const data = yield* HttpClientResponse.schemaBodyJson(SendMessageResponse)(response)
-          if (!data.ok) {
-            return yield* new TelegramError({
-              message: data.description ?? "Unknown Telegram error"
-            })
-          }
-        }).pipe(Effect.mapError(error => new TelegramError({ message: String(error) })))
+        })
     )
 
     const sendChatAction = Effect.fn("TelegramBot.sendChatAction")(

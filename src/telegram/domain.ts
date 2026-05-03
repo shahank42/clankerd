@@ -31,7 +31,13 @@ export const GetUpdatesResponse = Schema.Struct({
   error_code: Schema.optional(Schema.Number)
 })
 
-export const SendMessageBody = Schema.Struct({
+export const SendMessageBodyMarkdown = Schema.Struct({
+  chat_id: Schema.Number,
+  text: Schema.String,
+  parse_mode: Schema.Literal("MarkdownV2")
+})
+
+export const SendMessageBodyPlain = Schema.Struct({
   chat_id: Schema.Number,
   text: Schema.String
 })
